@@ -163,7 +163,7 @@ if (ENABLE_GPUMP)
 endif()
 
 if (ENABLE_MP)
-  set(comb_depends ${comb_depends} mp)
+  set(comb_depends ${comb_depends} mp gdsync)
 endif()
 
 if (ENABLE_UMR)

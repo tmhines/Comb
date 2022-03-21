@@ -14,7 +14,7 @@
 ##############################################################################
 
 find_path(MP_PATH
-    NAMES "lib/libmp.so"
+    NAMES "lib/libmp.a"
     PATHS
       ENV MP_DIR
       /opt/ibm/spectrum_mpi/libmp
@@ -26,8 +26,8 @@ if(MP_PATH)
     set(MP_FOUND TRUE)
     set(MP_CXX_COMPILE_FLAGS -I${MP_PATH}/include)
     set(MP_INCLUDE_PATH      ${MP_PATH}/include)
-    set(MP_CXX_LINK_FLAGS    -L${MP_PATH}/lib)
-    set(MP_CXX_LIBRARIES     ${MP_PATH}/lib/libmp.so)
+    set(MP_CXX_LINK_FLAGS    -L${MP_PATH}/lib -lcuda -libverbs -lgdrapi)
+    set(MP_CXX_LIBRARIES     ${MP_PATH}/lib/libmp.a)
     set(MP_ARCH              )
 else()
     set(MP_FOUND FALSE)
