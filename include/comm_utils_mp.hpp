@@ -73,7 +73,7 @@ inline void deregister(mp_reg_t& reg)
 
 inline void irecv(void *buf, size_t size, int src, mp_reg_t* reg, mp_request_t *req)
 {
-  // LOGPRINTF("mp_irecv() rank(w%i) %p[%zu] src(%i) reg(%p) req(%p)\n", MPI::Comm_rank(MPI_COMM_WORLD), buf, size, src, reg, req);
+  LOGPRINTF("mp_irecv() rank(w%i) %p[%zu] src(%i) reg(%p) req(%p)\n", MPI::Comm_rank(MPI_COMM_WORLD), buf, size, src, reg, req);
   auto ret = mp_irecv(buf, size, src, reg, req);
   assert(ret == MP_SUCCESS);
 }
@@ -94,7 +94,7 @@ inline void send_on_stream(void *buf, size_t size, int dst, mp_reg_t* reg, mp_re
 
 inline void isend_on_stream(void *buf, size_t size, int dst, mp_reg_t* reg, mp_request_t *req, cudaStream_t stream)
 {
-  // LOGPRINTF("mp_isend_on_stream() rank(w%i) %p[%zu] dst(%i) reg(%p) req(%p) stream(%p)\n", MPI::Comm_rank(MPI_COMM_WORLD), buf, size, dst, reg, req, (void*)stream);
+  LOGPRINTF("mp_isend_on_stream() rank(w%i) %p[%zu] dst(%i) reg(%p) req(%p) stream(%p)\n", MPI::Comm_rank(MPI_COMM_WORLD), buf, size, dst, reg, req, (void*)stream);
   auto ret = mp_isend_on_stream(buf, size, dst, reg, req, stream);
   assert(ret == MP_SUCCESS);
 }
@@ -115,7 +115,7 @@ inline void wait_all_on_stream(size_t count, mp_request_t *req, cudaStream_t str
 
 inline void wait(mp_request_t *req)
 {
-  // LOGPRINTF("mp_wait() rank(w%i) req(%p)\n", MPI::Comm_rank(MPI_COMM_WORLD), req);
+  LOGPRINTF("mp_wait() rank(w%i) req(%p)\n", MPI::Comm_rank(MPI_COMM_WORLD), req);
   auto ret = mp_wait(req);
   assert(ret == MP_SUCCESS);
 }

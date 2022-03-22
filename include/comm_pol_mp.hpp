@@ -31,16 +31,27 @@
 #include "MessageBase.hpp"
 #include "ExecContext.hpp"
 
+namespace detail
+{
+namespace mp
+{
+struct Request
+{
+	mp_request_t request;
+	mp_reg_t reg;
+};
+}
+}
 
 struct mp_pol {
   // static const bool async = false;
   static const bool mock = false;
   // compile mpi_type packing/unpacking tests for this comm policy
   static const bool use_mpi_type = false;
-  static const bool persistent = false;
+  static const bool persistent = true;
   static const char* get_name() { return "mp"; }
-  using send_request_type = mp_request_t;
-  using recv_request_type = mp_request_t;
+  using send_request_type = detail::mp::Request;
+  using recv_request_type = detail::mp::Request;
   using send_status_type = int;
   using recv_status_type = int;
 };
@@ -95,8 +106,8 @@ struct CommContext<mp_pol> : CudaContext
     base::waitOn(con);
   }
 
-  send_request_type send_request_null() { return nullptr; }
-  recv_request_type recv_request_null() { return nullptr; }
+  send_request_type send_request_null() { return detail::mp::Request{}; }
+  recv_request_type recv_request_null() { return detail::mp::Request{}; }
   send_status_type send_status_null() { return 0; }
   recv_status_type recv_status_null() { return 0; }
 
@@ -148,42 +159,45 @@ struct Message<MessageBase::Kind::send, mp_pol>
                            int count, request_type* requests,
                            status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static int wait_send_any(communicator_type& con_comm,
                            int count, request_type* requests,
                            status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static int test_send_some(communicator_type& con_comm,
                             int count, request_type* requests,
                             int* indices, status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static int wait_send_some(communicator_type& con_comm,
                             int count, request_type* requests,
                             int* indices, status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static bool test_send_all(communicator_type& con_comm,
                             int count, request_type* requests,
                             status_type* statuses)
   {
-	  
+	  return false;
   }
 
   static void wait_send_all(communicator_type& con_comm,
                             int count, request_type* requests,
                             status_type* statuses)
   {
-	  
+	  for(IdxT i = 0; i < count; i++)
+	  {
+		  detail::mp::wait(&requests[i].request);
+	  }
   }
 
 };
@@ -208,42 +222,45 @@ struct Message<MessageBase::Kind::recv, mp_pol>
                            int count, request_type* requests,
                            status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static int wait_recv_any(communicator_type& con_comm,
                            int count, request_type* requests,
                            status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static int test_recv_some(communicator_type& con_comm,
                             int count, request_type* requests,
                             int* indices, status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static int wait_recv_some(communicator_type& con_comm,
                             int count, request_type* requests,
                             int* indices, status_type* statuses)
   {
-	  
+	  return -1;
   }
 
   static bool test_recv_all(communicator_type& con_comm,
                             int count, request_type* requests,
                             status_type* statuses)
   {
-	  
+	  return false;
   }
 
   static void wait_recv_all(communicator_type& con_comm,
                             int count, request_type* requests,
                             status_type* statuses)
   {
-	  
+	  for(IdxT i = 0; i < count; i++)
+	  {
+		  detail::mp::wait(&requests[i].request);
+	  }
   }
 
 };
@@ -279,17 +296,37 @@ struct MessageGroup<MessageBase::Kind::send, mp_pol, exec_policy>
 
   void setup(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, request_type* requests)
   {
-    COMB::ignore_unused(con, con_comm, msgs, len, requests);
+    for(IdxT i = 0; i < len; i++)
+	{
+		message_type* msg = msgs[i];
+		IdxT msg_nbytes = msg->nbytes() * this->m_variables.size();
+		msg->buf = this->m_aloc.allocate(msg_nbytes);
+		assert(msg->buf != nullptr);
+		char* buf = static_cast<char*>(msg->buf);
+		LOGPRINTF("Registering %zu bytes for send\n", msg_nbytes);
+		requests[i].reg = detail::mp::register_(buf, msg_nbytes);
+	}
   }
 
   void cleanup(communicator_type& con_comm, message_type** msgs, IdxT len, request_type* requests)
   {
-    COMB::ignore_unused(con_comm, msgs, len, requests);
+    for(IdxT i = 0; i < len; i++)
+	{
+		message_type* msg = msgs[i];
+		this->m_aloc.deallocate(msg->buf);
+		
+		detail::mp::deregister(requests[i].reg);
+	}
   }
 
   void allocate(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async)
   {
+	  if(len <= 0) return;
 	  
+	  if(comb_allow_pack_loop_fusion())
+	  {
+		  this->m_fuser.allocate(con, this->m_variables, this->m_items.size());
+	  }
   }
 
   void pack(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async)
@@ -337,9 +374,22 @@ struct MessageGroup<MessageBase::Kind::send, mp_pol, exec_policy>
 	  
   }
 
-  void Isend(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async, request_type* requests)
+  void Isend(CudaContext& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async, request_type* requests)
   {
+	  if(len <= 0) return;
 	  
+	  for(IdxT i = 0; i < len; i++)
+	  {
+		  message_type* msg = msgs[i];
+		  IdxT msg_nbytes = msg->nbytes() * this->m_variables.size();
+		  assert(msg->buf != nullptr);
+		  detail::mp::isend_on_stream(msg->buf, msg_nbytes, msg->partner_rank, &requests[i].reg, &requests[i].request, con.stream_launch());
+	  }
+  }
+  
+  void Isend(CPUContext& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async, request_type* requests)
+  {
+	  LOGPRINTF("Entered empty Isend\n");
   }
 
   static void finish_Isends(context_type& con, communicator_type& con_comm)
@@ -349,7 +399,12 @@ struct MessageGroup<MessageBase::Kind::send, mp_pol, exec_policy>
 
   void deallocate(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async)
   {
+	  if(len <= 0) return;
 	  
+	  if(comb_allow_pack_loop_fusion())
+	  {
+		  this->m_fuser.deallocate(con);
+	  }
   }
 };
 
@@ -383,22 +438,50 @@ struct MessageGroup<MessageBase::Kind::recv, mp_pol, exec_policy>
 
   void setup(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, request_type* requests)
   {
-    COMB::ignore_unused(con, con_comm, msgs, len, requests);
+    for(IdxT i = 0; i < len; i++)
+	{
+		message_type* msg = msgs[i];
+		IdxT msg_nbytes = msg->nbytes() * this->m_variables.size();
+		msg->buf = this->m_aloc.allocate(msg_nbytes);
+		assert(msg->buf != nullptr);
+		char* buf = static_cast<char*>(msg->buf);
+		LOGPRINTF("Registering %zu bytes for recv %zu %p\n", msg_nbytes, i, &requests[i]);
+		requests[i].reg = detail::mp::register_(buf, msg_nbytes);
+	}
   }
 
   void cleanup(communicator_type& con_comm, message_type** msgs, IdxT len, request_type* requests)
   {
-    COMB::ignore_unused(con_comm, msgs, len, requests);
+    for(IdxT i = 0; i < len; i++)
+	{
+		message_type* msg = msgs[i];
+		this->m_aloc.deallocate(msg->buf);
+		
+		detail::mp::deregister(requests[i].reg);
+	}
   }
 
   void allocate(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async)
   {
+	  if(len <= 0) return;
 	  
+	  if(comb_allow_pack_loop_fusion())
+	  {
+		  this->m_fuser.allocate(con, this->m_variables, this->m_items.size());
+	  }
   }
 
   void Irecv(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async, request_type* requests)
   {
+	  if(len <= 0) return;
 	  
+	  for(IdxT i = 0; i < len; i++)
+	  {
+		  message_type* msg = msgs[i];
+		  IdxT msg_nbytes = msg->nbytes() * this->m_variables.size();
+		  assert(msg->buf != nullptr);
+		  detail::mp::irecv(msg->buf, msg_nbytes, msg->partner_rank, &requests[i].reg, &requests[i].request);
+	  }
   }
 
   void unpack(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async)
@@ -430,7 +513,12 @@ struct MessageGroup<MessageBase::Kind::recv, mp_pol, exec_policy>
 
   void deallocate(context_type& con, communicator_type& con_comm, message_type** msgs, IdxT len, detail::Async async)
   {
+	  if(len <= 0) return;
 	  
+	  if(comb_allow_pack_loop_fusion())
+	  {
+		  this->m_fuser.deallocate(con);
+	  }
   }
 };
 

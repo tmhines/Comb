@@ -104,7 +104,7 @@ struct Timer {
     ~TimePoint()
     {
 #ifdef COMB_ENABLE_CUDA
-      cudaCheck(cudaEventDestroy(tp_cuda));
+      //cudaCheck(cudaEventDestroy(tp_cuda));
 #endif
     }
   };
